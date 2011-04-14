@@ -97,10 +97,10 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 				if(--depth < 0)
 					goto parse_error;
 				HANDLE_END_LIST();
-			} else if(*p == '"') {
+			} else if(depth && *p == '"') {
 				state = SEXP_QUOTED_ATOM;
 				l = p+1;
-			} else if(is_valid_atom(*p)) {
+			} else if(depth && is_valid_atom(*p)) {
 				state = SEXP_ATOM;
 				l = p;
 			} else if(!is_whitespace(*p)) {
@@ -176,6 +176,12 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 			break;
 		}
 		++p;
+	}
+	if(depth != 0) {
+		goto parse_error;
+	} else if(state != SEXP_LIST && state != SEXP_POST_ATOM) {
+		p = l;
+		goto parse_error;
 	}
 done:
 	return 0;
