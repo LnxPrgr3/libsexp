@@ -41,7 +41,21 @@ struct sexp_callbacks {
 	void (*handle_error)(int line, int column, char c);
 };
 
+typedef int (*sexp_writer_cb)(const char *data, int len);
+
+struct sexp_writer {
+	int depth;
+	int error;
+	sexp_writer_cb do_write;
+};
+
 int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks);
+void sexp_writer_init(struct sexp_writer *writer, sexp_writer_cb do_write);
+int sexp_writer_start_list(struct sexp_writer *writer, const char *name);
+int sexp_writer_write_atom(struct sexp_writer *writer, const char *atom);
+int sexp_writer_write_quoted_atom(struct sexp_writer *writer, const char *atom);
+int sexp_writer_end_list(struct sexp_writer *writer);
+int sexp_writer_write_list(struct sexp_writer *writer, const char *name, ...);
 
 #ifdef __cplusplus
 }

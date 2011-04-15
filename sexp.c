@@ -29,6 +29,8 @@
 
 #include "sexp.h"
 #include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
 
 typedef int (*handle_atom_cb)(const char *atom, int len, int depth);
 
@@ -38,6 +40,15 @@ static int is_valid_atom(char c) {
 	       (c >= '0' && c <= '9') ||
 	       c == '+' || c == '-' ||
 	       c == '*' || c == '/';
+}
+
+static int str_is_valid_atom(const char *atom) {
+	while(*atom) {
+		if(!is_valid_atom(*atom))
+			return 0;
+		++atom;
+	}
+	return 1;
 }
 
 static int is_whitespace(char c) {
@@ -189,5 +200,117 @@ done:
 parse_error:
 	if(callbacks && callbacks->handle_error)
 		callbacks->handle_error(line, column, *p);
+	return -1;
+}
+
+void sexp_writer_init(struct sexp_writer *writer, sexp_writer_cb do_write) {
+	writer->depth = 0;
+	writer->error = 0;
+	writer->do_write = do_write; 
+}
+
+static int indent(struct sexp_writer *writer) {
+	if(writer->depth) {
+		int buf_len = writer->depth+1;
+		char buffer[buf_len];
+		buffer[0] = '\n';
+		for(int i=1;i<buf_len;++i)
+			buffer[i] = '\t';
+		return writer->do_write(buffer, buf_len);
+	}
+	return 0;
+}
+
+int sexp_writer_start_list(struct sexp_writer *writer, const char *name) {
+	if(!writer->error) {
+		int buf_len = strlen(name)+2, i;
+		char buffer[buf_len];
+		buffer[0] = '(';
+		strcpy(buffer+1, name);
+		if(!str_is_valid_atom(name)) {
+			writer->error = 1;
+			return -1;
+		}
+		indent(writer);
+		if(writer->do_write(buffer, buf_len-1))
+			return -1;
+		++writer->depth;
+		return 0;
+	}
+	return -1;
+}
+
+int sexp_writer_write_atom(struct sexp_writer *writer, const char *atom) {
+	if(!writer->error) {
+		if(writer->depth) {
+			if(str_is_valid_atom(atom)) {
+				int buf_len = strlen(atom)+2;
+				char buffer[buf_len];
+				buffer[0] = ' ';
+				strcpy(buffer+1, atom);
+				if(writer->do_write(buffer, buf_len-1))
+					return -1;
+				return 0;
+			} else {
+				return sexp_writer_write_quoted_atom(writer, atom);
+			}
+		}
+		writer->error = 1;
+	}
+	return -1;
+}
+
+int sexp_writer_write_quoted_atom(struct sexp_writer *writer, const char *atom) {
+	if(!writer->error) {
+		if(writer->depth) {
+			int buf_len = strlen(atom)*2+3;
+			char buffer[buf_len], *opos = buffer;
+			*opos++ = ' ';
+			*opos++ = '"';
+			while(*atom) {
+				if(*atom == '\\' || *atom == '"') {
+					*opos++ = '\\';
+				}
+				*opos++ = *atom++;
+			}
+			*opos++ = '"';
+			if(writer->do_write(buffer, opos-buffer))
+				return -1;
+			return 0;
+		}
+		writer->error = 1;
+	}
+	return -1;
+}
+
+int sexp_writer_end_list(struct sexp_writer *writer) {
+	if(!writer->error) {
+		if(writer->depth) {
+			char c = ')';
+			if(writer->do_write(&c, 1))
+				return -1;
+			--writer->depth;
+			return 0;
+		}
+		writer->error = 1;
+	}
+	return -1;
+}
+
+int sexp_writer_write_list(struct sexp_writer *writer, const char *name, ...) {
+	if(!writer->error) {
+		va_list ap;
+		const char *atom;
+		va_start(ap, name);
+		if(sexp_writer_start_list(writer, name))
+			return -1;
+		while((atom = va_arg(ap, const char *)) != NULL) {
+			if(sexp_writer_write_atom(writer, atom))
+				return -1;
+		}
+		if(sexp_writer_end_list(writer))
+			return -1;
+		return 0;
+	}
 	return -1;
 }
