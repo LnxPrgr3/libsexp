@@ -191,6 +191,7 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 				if(--depth < 0)
 					goto parse_error;
 				HANDLE_END_LIST();
+				state = SEXP_LIST;
 			} else if(is_valid_atom(*p)) { /* Entering an atom */
 				state = SEXP_ATOM;
 				first_atom = 1;
