@@ -40,33 +40,37 @@ extern "C" {
 struct sexp_callbacks {
 	/**
 	 * \brief Function called for each new list
+	 * \param user_data data supplied in the call to sexp_parse
 	 * \param name the first atom in the list
 	 * \param len the length of the first atom
 	 * \param depth the nesting depth at which this list was encountered
 	 * \return 0 to continue parsing or nonzero to stop parsing
 	 */
-	int (*begin_list)(const char *name, int len, int depth);
+	int (*begin_list)(void *user_data, const char *name, int len, int depth);
 	/**
 	 * \brief Function called for each atom after the first in a list
+	 * \param user_data data supplied in the call to sexp_parse
 	 * \param atom the contents of the atom
 	 * \param len the length of the atom
 	 * \param depth the nesting depth at which this atom was encountered
 	 * \return 0 to continue parsing or nonzero to stop parsing
 	 */
-	int (*handle_atom)(const char *atom, int len, int depth);
+	int (*handle_atom)(void *user_data, const char *atom, int len, int depth);
 	/**
 	 * \brief Function called at the end of each list
+	 * \param user_data data supplied in the call to sexp_parse
 	 * \param depth the nesting depth at which this list was encountered
 	 * \return 0 to continue parsing or nonzero to stop parsing
 	 */
-	int (*end_list)(int depth);
+	int (*end_list)(void *user_data, int depth);
 	/**
 	 * \brief Function called when a parsing error occurs
+	 * \param user_data data supplied in the call to sexp_parse
 	 * \param line the line number on which the error occured
 	 * \param column the column on which the error occured
 	 * \param c the character that triggered the error
 	 */
-	void (*handle_error)(int line, int column, char c);
+	void (*handle_error)(void *user_data, int line, int column, char c);
 };
 
 /**
@@ -75,7 +79,7 @@ struct sexp_callbacks {
  * \param len the number of characters of data to write
  * \return 0 if the write was successful, nonzero otherwise
  */
-typedef int (*sexp_writer_cb)(const char *data, int len);
+typedef int (*sexp_writer_cb)(void *user_data, const char *data, int len);
 
 /**
  * \brief S-expression writer state
@@ -84,21 +88,24 @@ struct sexp_writer {
 	int depth;
 	int error;
 	sexp_writer_cb do_write;
+	void *user_data;
 };
 
 /**
  * \brief Parse the given S-expression
  * \param sexp the S-expression to parse
  * \param callbacks callbacks to call for parsing events
+ * \param user_data data to be passed to the caller during callbacks
  * \return 0 if parsing was successful, nonzero otherwise
  */
-int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks);
+int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks, void *user_data);
 /**
  * \brief Initialize an S-expression writer structure
  * \param writer the S-expression writer to initialize
  * \param do_write callback to call with rendered character data
+ * \param user_data data to be passed to the caller during callbacks
  */
-void sexp_writer_init(struct sexp_writer *writer, sexp_writer_cb do_write);
+void sexp_writer_init(struct sexp_writer *writer, sexp_writer_cb do_write, void *user_data);
 /**
  * \brief Begin writing a new list
  * \param writer the S-expression writer to use

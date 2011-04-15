@@ -31,7 +31,7 @@
 #include <string.h>
 #include <stdarg.h>
 
-typedef int (*handle_atom_cb)(const char *atom, int len, int depth);
+typedef int (*handle_atom_cb)(void *user_data, const char *atom, int len, int depth);
 
 /**
  * \brief Determine whether a character is valid in an unquoted atom
@@ -89,27 +89,29 @@ static void update_position(int *line, int *column, char c) {
  * \param atom the atom to unescape
  * \param end pointer to the end of the atom
  * \param depth current depth in S-expression
+ * \param user_data data supplied in the call to sexp_parse
  * \param handle_atom callback to call with unescaped atom
  */
 static int handle_escaped_atom(const char *atom, const char *end, int depth,
-                               handle_atom_cb handle_atom) {
+                               handle_atom_cb handle_atom, void *user_data) {
 	char buffer[end-atom], *opos = buffer;
 	while(atom < end) {
 		if(*atom == '\\')
 			++atom;
 		*opos++ = *atom++;
 	}
-	return handle_atom(buffer, opos-buffer, depth);
+	return handle_atom(user_data, buffer, opos-buffer, depth);
 }
 
 #define HANDLE_BEGIN_LIST() do {                                           \
 	if(callbacks && callbacks->begin_list &&                               \
-	   callbacks->begin_list(l, p-l, depth-1))                             \
+	   callbacks->begin_list(user_data, l, p-l, depth-1))                  \
 		goto done;                                                         \
 } while(0)
 
 #define HANDLE_END_LIST() do {                                             \
-	if(callbacks && callbacks->end_list && callbacks->end_list(depth))     \
+	if(callbacks && callbacks->end_list &&                                 \
+	   callbacks->end_list(user_data, depth))                              \
 		goto done;                                                         \
 } while(0)
 
@@ -149,7 +151,7 @@ typedef enum {
 	SEXP_ESCAPED_CHAR
 } state_t;
 
-int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
+int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks, void *user_data) {
 	const char *p = sexp; /* Current position in S-expression */
 	const char *l = sexp; /* Beginning of the last interesting token */
 	state_t state = SEXP_LIST; /* Current parsing state */
@@ -207,7 +209,7 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 				} else {
 					/* Notify caller of additional atom in list */
 					if(callbacks && callbacks->handle_atom &&
-					   callbacks->handle_atom(l, p-l, depth))
+					   callbacks->handle_atom(user_data, l, p-l, depth))
 						goto done;
 				}
 				first_atom = 0;
@@ -223,10 +225,11 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 				if(callbacks && callbacks->handle_atom) {
 					if(escaped_atom) { /* Atom needs to be escaped */
 						if(handle_escaped_atom(l, p, depth,
-						                       callbacks->handle_atom))
+						                       callbacks->handle_atom,
+						                       user_data))
 							goto done;
 					} else {
-						if(callbacks->handle_atom(l, p-l, depth))
+						if(callbacks->handle_atom(user_data, l, p-l, depth))
 							goto done;
 					}
 				}
@@ -254,14 +257,15 @@ done:
 parse_error:
 	/* Notify caller of a parse error */
 	if(callbacks && callbacks->handle_error)
-		callbacks->handle_error(line, column, *p);
+		callbacks->handle_error(user_data, line, column, *p);
 	return -1;
 }
 
-void sexp_writer_init(struct sexp_writer *writer, sexp_writer_cb do_write) {
+void sexp_writer_init(struct sexp_writer *writer, sexp_writer_cb do_write, void *user_data) {
 	writer->depth = 0;
 	writer->error = 0;
-	writer->do_write = do_write; 
+	writer->do_write = do_write;
+	writer->user_data = user_data;
 }
 
 /**
@@ -277,7 +281,7 @@ static int indent(struct sexp_writer *writer) {
 		buffer[0] = '\n';
 		for(int i=1;i<buf_len;++i)
 			buffer[i] = '\t';
-		return writer->do_write(buffer, buf_len);
+		return writer->do_write(writer->user_data, buffer, buf_len);
 	}
 	return 0;
 }
@@ -296,7 +300,7 @@ int sexp_writer_start_list(struct sexp_writer *writer, const char *name) {
 		/* Add whitespace for pretty printing */
 		indent(writer);
 		/* Now actually write the string we built before */
-		if(writer->do_write(buffer, buf_len-1))
+		if(writer->do_write(writer->user_data, buffer, buf_len-1))
 			return -1;
 		++writer->depth;
 		return 0;
@@ -313,7 +317,7 @@ int sexp_writer_write_atom(struct sexp_writer *writer, const char *atom) {
 				char buffer[buf_len];
 				buffer[0] = ' ';
 				strcpy(buffer+1, atom);
-				if(writer->do_write(buffer, buf_len-1))
+				if(writer->do_write(writer->user_data, buffer, buf_len-1))
 					return -1;
 				return 0;
 			} else {
@@ -340,7 +344,7 @@ int sexp_writer_write_quoted_atom(struct sexp_writer *writer, const char *atom) 
 				*opos++ = *atom++;
 			}
 			*opos++ = '"'; /* Close quotes */
-			if(writer->do_write(buffer, opos-buffer))
+			if(writer->do_write(writer->user_data, buffer, opos-buffer))
 				return -1;
 			return 0;
 		}
@@ -354,7 +358,7 @@ int sexp_writer_end_list(struct sexp_writer *writer) {
 		if(writer->depth) {
 			/* Only need to write a close paren */
 			char c = ')';
-			if(writer->do_write(&c, 1))
+			if(writer->do_write(writer->user_data, &c, 1))
 				return -1;
 			--writer->depth;
 			return 0;
