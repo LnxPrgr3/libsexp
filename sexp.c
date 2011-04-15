@@ -34,6 +34,11 @@
 
 typedef int (*handle_atom_cb)(const char *atom, int len, int depth);
 
+/**
+ * \brief Determine whether a character is valid in an unquoted atom
+ * \param c character to test
+ * \return true if the character is valid in an unquoted atom, false otherwise
+ */
 static int is_valid_atom(char c) {
 	return (c >= 'A' && c <= 'Z') ||
 	       (c >= 'a' && c <= 'z') ||
@@ -42,6 +47,11 @@ static int is_valid_atom(char c) {
 	       c == '*' || c == '/';
 }
 
+/**
+ * \brief Determine whether the given atom is valid unquoted
+ * \param atom atom to test
+ * \return true if the atom needs quoting, false otherwise
+ */
 static int str_is_valid_atom(const char *atom) {
 	while(*atom) {
 		if(!is_valid_atom(*atom))
@@ -51,10 +61,17 @@ static int str_is_valid_atom(const char *atom) {
 	return 1;
 }
 
+/**
+ * \brief Determine whether a character is whitespace
+ * \return true if the character is whitespace, false otherwise
+ */
 static int is_whitespace(char c) {
 	return c == ' ' || c == '\n' || c == '\t';
 }
 
+/**
+ * \brief Update current location in S-expression
+ */
 static void update_position(int *line, int *column, char c) {
 	switch(c) {
 	case '\n':
@@ -68,6 +85,13 @@ static void update_position(int *line, int *column, char c) {
 	}
 }
 
+/**
+ * \brief Un-escape atom before passing it to the handle_atom callback
+ * \param atom the atom to unescape
+ * \param end pointer to the end of the atom
+ * \param depth current depth in S-expression
+ * \param handle_atom callback to call with unescaped atom
+ */
 static int handle_escaped_atom(const char *atom, const char *end, int depth,
                                handle_atom_cb handle_atom) {
 	char buffer[end-atom], *opos = buffer;
@@ -90,28 +114,72 @@ static int handle_escaped_atom(const char *atom, const char *end, int depth,
 		goto done;                                                         \
 } while(0)
 
+/**
+ * \brief S-expression parser state
+ */
+typedef enum {
+	/**
+	 * \brief Inside a list and past the first atom
+	 *
+	 * Next valid states: SEXP_LIST_START, SEXP_ATOM, SEXP_QUOTED_ATOM
+	 */
+	SEXP_LIST,
+	/**
+	 * \brief Inside a list before the first atom
+	 *
+	 * Next valid states: SEXP_ATOM
+	 */
+	SEXP_LIST_START,
+	/**
+	 * \brief Inside an atom
+	 *
+	 * Next valid states: SEXP_LIST
+	 */
+	SEXP_ATOM,
+	/**
+	 * \brief Inside a quoted atom
+	 *
+	 * Next valid states: SEXP_ESCAPED_CHAR, SEXP_POST_ATOM
+	 */
+	SEXP_QUOTED_ATOM,
+	/**
+	 * \brief Inside an escape sequence
+	 *
+	 * Next valid states: SEXP_QUOTED_ATOM
+	 */
+	SEXP_ESCAPED_CHAR,
+	/**
+	 * \brief Just past an atom
+	 *
+	 * Next valid states: SEXP_LIST
+	 */
+	SEXP_POST_ATOM
+} state_t;
+
 int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
-	const char *p = sexp, *l = sexp;
-	enum {SEXP_LIST, SEXP_LIST_START, SEXP_ATOM, SEXP_QUOTED_ATOM, SEXP_ESCAPED_CHAR, SEXP_POST_ATOM} state = SEXP_LIST;
-	int line = 1, column = 1;
-	int depth = 0;
-	int first_atom = 0;
-	int escaped_atom = 0;
+	const char *p = sexp; /* Current position in S-expression */
+	const char *l = sexp; /* Beginning of the last interesting token */
+	state_t state = SEXP_LIST; /* Current parsing state */
+	int line = 1; /* Current line in input */
+	int column = 1; /* Current column in input */
+	int depth = 0; /* Current number of containing lists */
+	int first_atom = 0; /* Nonzero when reading the first atom in a list */
+	int escaped_atom = 0; /* Nonzero when reading an atom with escaped chars */
 	while(*p) {
 		update_position(&line, &column, *p);
 		switch(state) {
 		case SEXP_LIST:
-			if(*p == '(') {
+			if(*p == '(') { /* Entering a list */
 				++depth;
 				state = SEXP_LIST_START;
-			} else if(*p == ')') {
+			} else if(*p == ')') { /* Ending a list */
 				if(--depth < 0)
 					goto parse_error;
 				HANDLE_END_LIST();
-			} else if(depth && *p == '"') {
+			} else if(depth && *p == '"') { /* Entering a quoted atom */
 				state = SEXP_QUOTED_ATOM;
 				l = p+1;
-			} else if(depth && is_valid_atom(*p)) {
+			} else if(depth && is_valid_atom(*p)) { /* Entering an atom */
 				state = SEXP_ATOM;
 				l = p;
 			} else if(!is_whitespace(*p)) {
@@ -119,11 +187,11 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 			}
 			break;
 		case SEXP_LIST_START:
-			if(*p == ')') {
+			if(*p == ')') { /* Ending a list */
 				if(--depth < 0)
 					goto parse_error;
 				HANDLE_END_LIST();
-			} else if(is_valid_atom(*p)) {
+			} else if(is_valid_atom(*p)) { /* Entering an atom */
 				state = SEXP_ATOM;
 				first_atom = 1;
 				l = p;
@@ -132,17 +200,18 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 			}
 			break;
 		case SEXP_ATOM:
-			if(!is_valid_atom(*p)) {
-				if(*p == ')') {
+			if(!is_valid_atom(*p)) { /* Ending an atom */
+				if(*p == ')') { /* Also ending a list */
 					if(--depth < 0)
 						goto parse_error;
 					HANDLE_END_LIST();
 				} else if(!is_whitespace(*p)) {
 					goto parse_error;
 				}
-				if(first_atom) {
+				if(first_atom) { /* Have first atom of list, so notify caller */
 					HANDLE_BEGIN_LIST();
 				} else {
+					/* Notify caller of additional atom in list */
 					if(callbacks && callbacks->handle_atom &&
 					   callbacks->handle_atom(l, p-l, depth))
 						goto done;
@@ -152,12 +221,13 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 			}
 			break;
 		case SEXP_QUOTED_ATOM:
-			if(*p == '\\') {
+			if(*p == '\\') { /* Escape the next character */
 				escaped_atom = 1;
 				state = SEXP_ESCAPED_CHAR;
-			} else if(*p == '"') {
+			} else if(*p == '"') { /* Ending quoted atom */
+				/* Notify caller about this atom */
 				if(callbacks && callbacks->handle_atom) {
-					if(escaped_atom) {
+					if(escaped_atom) { /* Atom needs to be escaped */
 						if(handle_escaped_atom(l, p, depth,
 						                       callbacks->handle_atom))
 							goto done;
@@ -175,7 +245,7 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 			state = SEXP_QUOTED_ATOM;
 			break;
 		case SEXP_POST_ATOM:
-			if(*p == ')') {
+			if(*p == ')') { /* Ending a list */
 				if(--depth < 0)
 					goto parse_error;
 				HANDLE_END_LIST();
@@ -188,9 +258,10 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 		}
 		++p;
 	}
-	if(depth != 0) {
+	if(depth != 0) { /* S-expression didn't close all lists */
 		goto parse_error;
 	} else if(state != SEXP_LIST && state != SEXP_POST_ATOM) {
+		/* Parser hit end of S-expression in invalid state */
 		p = l;
 		goto parse_error;
 	}
@@ -198,6 +269,7 @@ done:
 	return 0;
 
 parse_error:
+	/* Notify caller of a parse error */
 	if(callbacks && callbacks->handle_error)
 		callbacks->handle_error(line, column, *p);
 	return -1;
