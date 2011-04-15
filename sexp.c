@@ -138,7 +138,7 @@ typedef enum {
 	/**
 	 * \brief Inside a quoted atom
 	 *
-	 * Next valid states: SEXP_ESCAPED_CHAR, SEXP_POST_ATOM
+	 * Next valid states: SEXP_ESCAPED_CHAR, SEXP_LIST
 	 */
 	SEXP_QUOTED_ATOM,
 	/**
@@ -146,13 +146,7 @@ typedef enum {
 	 *
 	 * Next valid states: SEXP_QUOTED_ATOM
 	 */
-	SEXP_ESCAPED_CHAR,
-	/**
-	 * \brief Just past an atom
-	 *
-	 * Next valid states: SEXP_LIST
-	 */
-	SEXP_POST_ATOM
+	SEXP_ESCAPED_CHAR
 } state_t;
 
 int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
@@ -236,7 +230,7 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 							goto done;
 					}
 				}
-				state = SEXP_POST_ATOM;
+				state = SEXP_LIST;
 				escaped_atom = 0;
 				break;
 			}
@@ -244,23 +238,12 @@ int sexp_parse(const char *sexp, struct sexp_callbacks *callbacks) {
 		case SEXP_ESCAPED_CHAR:
 			state = SEXP_QUOTED_ATOM;
 			break;
-		case SEXP_POST_ATOM:
-			if(*p == ')') { /* Ending a list */
-				if(--depth < 0)
-					goto parse_error;
-				HANDLE_END_LIST();
-			} else if(!is_whitespace(*p)) {
-				goto parse_error;
-			} else {
-				state = SEXP_LIST;
-			}
-			break;
 		}
 		++p;
 	}
 	if(depth != 0) { /* S-expression didn't close all lists */
 		goto parse_error;
-	} else if(state != SEXP_LIST && state != SEXP_POST_ATOM) {
+	} else if(state != SEXP_LIST) {
 		/* Parser hit end of S-expression in invalid state */
 		p = l;
 		goto parse_error;
