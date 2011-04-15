@@ -281,8 +281,14 @@ void sexp_writer_init(struct sexp_writer *writer, sexp_writer_cb do_write) {
 	writer->do_write = do_write; 
 }
 
+/**
+ * \brief Write whitespace before new list for readability
+ * \param writer the S-expression writer to use
+ * \return zero if write was successful, nonzero otherwise
+ */
 static int indent(struct sexp_writer *writer) {
 	if(writer->depth) {
+		/* Write newline, then indent to current depth */
 		int buf_len = writer->depth+1;
 		char buffer[buf_len];
 		buffer[0] = '\n';
@@ -295,6 +301,7 @@ static int indent(struct sexp_writer *writer) {
 
 int sexp_writer_start_list(struct sexp_writer *writer, const char *name) {
 	if(!writer->error) {
+		/* Prepare to write '(name' */
 		int buf_len = strlen(name)+2, i;
 		char buffer[buf_len];
 		buffer[0] = '(';
@@ -303,7 +310,9 @@ int sexp_writer_start_list(struct sexp_writer *writer, const char *name) {
 			writer->error = 1;
 			return -1;
 		}
+		/* Add whitespace for pretty printing */
 		indent(writer);
+		/* Now actually write the string we built before */
 		if(writer->do_write(buffer, buf_len-1))
 			return -1;
 		++writer->depth;
@@ -315,7 +324,8 @@ int sexp_writer_start_list(struct sexp_writer *writer, const char *name) {
 int sexp_writer_write_atom(struct sexp_writer *writer, const char *atom) {
 	if(!writer->error) {
 		if(writer->depth) {
-			if(str_is_valid_atom(atom)) {
+			if(str_is_valid_atom(atom)) { /* Atom doesn't need quoting */
+				/* Prepend a space to atom */
 				int buf_len = strlen(atom)+2;
 				char buffer[buf_len];
 				buffer[0] = ' ';
@@ -324,6 +334,7 @@ int sexp_writer_write_atom(struct sexp_writer *writer, const char *atom) {
 					return -1;
 				return 0;
 			} else {
+				/* Need to quote/escape atom before writing it */
 				return sexp_writer_write_quoted_atom(writer, atom);
 			}
 		}
@@ -337,15 +348,15 @@ int sexp_writer_write_quoted_atom(struct sexp_writer *writer, const char *atom) 
 		if(writer->depth) {
 			int buf_len = strlen(atom)*2+3;
 			char buffer[buf_len], *opos = buffer;
-			*opos++ = ' ';
-			*opos++ = '"';
+			*opos++ = ' '; /* Write a space before the atom */
+			*opos++ = '"'; /* Open quotes */
 			while(*atom) {
-				if(*atom == '\\' || *atom == '"') {
-					*opos++ = '\\';
+				if(*atom == '\\' || *atom == '"') { /* Char is special */
+					*opos++ = '\\';                 /* So escape it */
 				}
 				*opos++ = *atom++;
 			}
-			*opos++ = '"';
+			*opos++ = '"'; /* Close quotes */
 			if(writer->do_write(buffer, opos-buffer))
 				return -1;
 			return 0;
@@ -358,6 +369,7 @@ int sexp_writer_write_quoted_atom(struct sexp_writer *writer, const char *atom) 
 int sexp_writer_end_list(struct sexp_writer *writer) {
 	if(!writer->error) {
 		if(writer->depth) {
+			/* Only need to write a close paren */
 			char c = ')';
 			if(writer->do_write(&c, 1))
 				return -1;
@@ -374,12 +386,15 @@ int sexp_writer_write_list(struct sexp_writer *writer, const char *name, ...) {
 		va_list ap;
 		const char *atom;
 		va_start(ap, name);
+		/* First start the list */
 		if(sexp_writer_start_list(writer, name))
 			return -1;
+		/* Write any additional atoms */
 		while((atom = va_arg(ap, const char *)) != NULL) {
 			if(sexp_writer_write_atom(writer, atom))
 				return -1;
 		}
+		/* End the list */
 		if(sexp_writer_end_list(writer))
 			return -1;
 		return 0;
