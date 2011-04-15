@@ -4,7 +4,7 @@ The world's stuck on XML for hierarchal data storage, but this is madness. XML p
 
 Long before XML, there was another syntax for storing this kind of data: [S-expressions][^1].
 
-I'll wait while you grab your parenthesis.
+I'll wait while you [grab your parenthesis][^2].
 
 Got them? Great!
 
@@ -19,3 +19,4 @@ Compare this to XHTML:
 This library produces events similar to what you'd get from a forward-only XML parser like libexpat, only without having to deal with XML.
 
 [^1]: http://en.wikipedia.org/wiki/S-expression
+[^2]: http://xkcd.com/297/
