@@ -96,9 +96,25 @@ static int handle_escaped_atom(const char *atom, const char *end, int depth,
                                handle_atom_cb handle_atom, void *user_data) {
 	char buffer[end-atom], *opos = buffer;
 	while(atom < end) {
-		if(*atom == '\\')
+		if(*atom == '\\') {
 			++atom;
-		*opos++ = *atom++;
+			switch(*atom) {
+			case 'n':
+				*opos++ = '\n';
+				break;
+			case 'r':
+				*opos++ = '\r';
+				break;
+			case 't':
+				*opos++ = '\t';
+				break;
+			default:
+				*opos++ = *atom;
+			}
+			++atom;
+		} else {
+			*opos++ = *atom++;
+		}
 	}
 	return handle_atom(user_data, buffer, opos-buffer, depth);
 }
@@ -338,10 +354,29 @@ int sexp_writer_write_quoted_atom(struct sexp_writer *writer, const char *atom) 
 			*opos++ = ' '; /* Write a space before the atom */
 			*opos++ = '"'; /* Open quotes */
 			while(*atom) {
-				if(*atom == '\\' || *atom == '"') { /* Char is special */
-					*opos++ = '\\';                 /* So escape it */
+				/* Escape any special chars */
+				switch(*atom) {
+					case '\r':
+						*opos++ = '\\';
+						*opos++ = 'r';
+						++atom;
+						break;
+					case '\n':
+						*opos++ = '\\';
+						*opos++ = 'n';
+						++atom;
+						break;
+					case '\t':
+						*opos++ = '\\';
+						*opos++ = 't';
+						++atom;
+						break;
+					case '\\':
+					case '"':
+						*opos++ = '\\';
+					default:
+						*opos++ = *atom++;
 				}
-				*opos++ = *atom++;
 			}
 			*opos++ = '"'; /* Close quotes */
 			if(writer->do_write(writer->user_data, buffer, opos-buffer))
